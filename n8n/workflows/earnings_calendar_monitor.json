@@ -1,0 +1,166 @@
+{
+  "name": "Earnings Calendar Monitor",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule",
+      "name": "Check Every 6 Hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://finnhub.io/api/v1/calendar/earnings",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth",
+        "options": {
+          "queryParameters": {
+            "parameters": [
+              {
+                "name": "from",
+                "value": "={{ $now.format('yyyy-MM-dd') }}"
+              },
+              {
+                "name": "to",
+                "value": "={{ $now.plus({days: 7}).format('yyyy-MM-dd') }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "fetch-earnings",
+      "name": "Fetch Upcoming Earnings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [460, 300],
+      "notes": "Uses Finnhub API - requires API key credential"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Filter for your watchlist\nconst watchlist = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA'];\n\nconst earnings = $input.first().json.earningsCalendar || [];\n\nconst filtered = earnings.filter(e => watchlist.includes(e.symbol));\n\nreturn filtered.map(e => ({\n  json: {\n    symbol: e.symbol,\n    date: e.date,\n    hour: e.hour,\n    epsEstimate: e.epsEstimate,\n    epsActual: e.epsActual,\n    revenueEstimate: e.revenueEstimate,\n    revenueActual: e.revenueActual,\n    quarter: e.quarter,\n    year: e.year\n  }\n}));"
+      },
+      "id": "filter-watchlist",
+      "name": "Filter Watchlist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [680, 300],
+      "notes": "Edit the watchlist array with your tickers"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $json.length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-earnings",
+      "name": "Has Upcoming Earnings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nlet message = '📊 *Upcoming Earnings This Week*\\n\\n';\n\nitems.forEach(item => {\n  const e = item.json;\n  message += `*${e.symbol}* - ${e.date} (${e.hour})\\n`;\n  message += `  └ EPS Est: $${e.epsEstimate || 'N/A'} | Rev Est: $${(e.revenueEstimate/1e9).toFixed(2)}B\\n\\n`;\n});\n\nreturn [{ json: { message } }];"
+      },
+      "id": "format-message",
+      "name": "Format Alert Message",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1120, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-telegram",
+      "name": "Send Telegram Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1340, 200],
+      "notes": "Alternative: Use Slack, Email, or Discord"
+    }
+  ],
+  "connections": {
+    "Check Every 6 Hours": {
+      "main": [
+        [
+          {
+            "node": "Fetch Upcoming Earnings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Upcoming Earnings": {
+      "main": [
+        [
+          {
+            "node": "Filter Watchlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Filter Watchlist": {
+      "main": [
+        [
+          {
+            "node": "Has Upcoming Earnings?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has Upcoming Earnings?": {
+      "main": [
+        [
+          {
+            "node": "Format Alert Message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Format Alert Message": {
+      "main": [
+        [
+          {
+            "node": "Send Telegram Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "tags": ["investment", "earnings", "alerts"]
+}

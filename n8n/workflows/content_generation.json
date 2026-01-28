@@ -1,0 +1,143 @@
+{
+  "name": "Content Agent - Substack to Social",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [1]
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Weekly Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Triggers every Monday - adjust to match your Substack publishing schedule"
+    },
+    {
+      "parameters": {
+        "command": "cd /path/to/Time-Saver && python -m content_agent generate"
+      },
+      "id": "run-agent",
+      "name": "Run Content Agent",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [460, 300],
+      "notes": "Update the path to your Time-Saver installation"
+    },
+    {
+      "parameters": {
+        "filePath": "={{ $json.stdout.match(/Output saved to: (.+)/)?.[1] }}/schedule.json"
+      },
+      "id": "read-output",
+      "name": "Read Generated Content",
+      "type": "n8n-nodes-base.readBinaryFiles",
+      "typeVersion": 1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $json.summary.total_posts }}",
+              "operation": "isNotEmpty"
+            }
+          ]
+        }
+      },
+      "id": "check-success",
+      "name": "Check Generation Success",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "channel": "#content-alerts",
+        "text": "✅ Content generated successfully!\n\n📝 Source: {{ $json.source_article.title }}\n📊 Total posts: {{ $json.summary.total_posts }}\n\nLinkedIn: {{ $json.summary.linkedin_posts }} posts\nTwitter: {{ $json.summary.twitter_posts }} posts\nNotes: {{ $json.summary.notes_posts }} posts"
+      },
+      "id": "notify-success",
+      "name": "Notify Success",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1120, 200],
+      "notes": "Optional: Send notification to Slack"
+    },
+    {
+      "parameters": {
+        "channel": "#content-alerts",
+        "text": "❌ Content generation failed. Please check the logs."
+      },
+      "id": "notify-failure",
+      "name": "Notify Failure",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.1,
+      "position": [1120, 400]
+    }
+  ],
+  "connections": {
+    "Weekly Trigger": {
+      "main": [
+        [
+          {
+            "node": "Run Content Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Content Agent": {
+      "main": [
+        [
+          {
+            "node": "Read Generated Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Generated Content": {
+      "main": [
+        [
+          {
+            "node": "Check Generation Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Generation Success": {
+      "main": [
+        [
+          {
+            "node": "Notify Success",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Notify Failure",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "tags": ["content", "automation", "social-media"]
+}

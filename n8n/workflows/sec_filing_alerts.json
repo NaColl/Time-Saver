@@ -1,0 +1,186 @@
+{
+  "name": "SEC Filing Alerts",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 1
+            }
+          ]
+        }
+      },
+      "id": "hourly-check",
+      "name": "Hourly Check",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Your watchlist of CIK numbers (SEC company identifiers)\n// Find CIKs at: https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany\nconst watchlist = [\n  { cik: '0000320193', name: 'Apple Inc.' },\n  { cik: '0000789019', name: 'Microsoft Corp.' },\n  { cik: '0001652044', name: 'Alphabet Inc.' },\n  { cik: '0001018724', name: 'Amazon.com Inc.' },\n  { cik: '0001045810', name: 'NVIDIA Corp.' }\n];\n\nreturn watchlist.map(company => ({ json: company }));"
+      },
+      "id": "get-watchlist",
+      "name": "Get Watchlist",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "notes": "Add your company CIKs here"
+    },
+    {
+      "parameters": {
+        "url": "=https://data.sec.gov/submissions/CIK{{ $json.cik }}.json",
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": true
+            }
+          }
+        },
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "User-Agent",
+              "value": "YourName your@email.com"
+            }
+          ]
+        }
+      },
+      "id": "fetch-filings",
+      "name": "Fetch SEC Filings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 300],
+      "notes": "SEC requires User-Agent header - update with your info"
+    },
+    {
+      "parameters": {
+        "jsCode": "const data = $input.first().json.body;\nconst recentFilings = data.filings?.recent || {};\n\n// Get filings from last 24 hours\nconst oneDayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);\n\nconst importantForms = ['8-K', '10-K', '10-Q', '4', 'SC 13G', 'SC 13D', '13F-HR'];\n\nconst newFilings = [];\nfor (let i = 0; i < recentFilings.filingDate?.length; i++) {\n  const filingDate = new Date(recentFilings.filingDate[i]);\n  const form = recentFilings.form[i];\n  \n  if (filingDate > oneDayAgo && importantForms.includes(form)) {\n    newFilings.push({\n      form: form,\n      filingDate: recentFilings.filingDate[i],\n      accessionNumber: recentFilings.accessionNumber[i],\n      primaryDocument: recentFilings.primaryDocument[i],\n      description: recentFilings.primaryDocDescription?.[i] || '',\n      company: data.name,\n      cik: data.cik\n    });\n  }\n}\n\nreturn newFilings.map(f => ({ json: f }));"
+      },
+      "id": "parse-filings",
+      "name": "Parse Recent Filings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "number": [
+            {
+              "value1": "={{ $input.all().length }}",
+              "operation": "larger",
+              "value2": 0
+            }
+          ]
+        }
+      },
+      "id": "has-new-filings",
+      "name": "Has New Filings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const filing = $input.first().json;\n\nconst formDescriptions = {\n  '8-K': 'Material Event',\n  '10-K': 'Annual Report',\n  '10-Q': 'Quarterly Report',\n  '4': 'Insider Transaction',\n  'SC 13G': 'Passive Investment >5%',\n  'SC 13D': 'Active Investment >5%',\n  '13F-HR': 'Institutional Holdings'\n};\n\nconst docUrl = `https://www.sec.gov/Archives/edgar/data/${filing.cik}/${filing.accessionNumber.replace(/-/g, '')}/${filing.primaryDocument}`;\n\nconst message = `🚨 *New SEC Filing*\\n\\n` +\n  `*Company:* ${filing.company}\\n` +\n  `*Form:* ${filing.form} (${formDescriptions[filing.form] || 'Other'})\\n` +\n  `*Filed:* ${filing.filingDate}\\n` +\n  `*Description:* ${filing.description}\\n\\n` +\n  `📄 [View Filing](${docUrl})`;\n\nreturn [{ json: { message, url: docUrl } }];"
+      },
+      "id": "format-alert",
+      "name": "Format Alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 200]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message }}",
+        "additionalFields": {
+          "parse_mode": "Markdown",
+          "disable_web_page_preview": true
+        }
+      },
+      "id": "send-alert",
+      "name": "Send Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1560, 200]
+    }
+  ],
+  "connections": {
+    "Hourly Check": {
+      "main": [
+        [
+          {
+            "node": "Get Watchlist",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Watchlist": {
+      "main": [
+        [
+          {
+            "node": "Fetch SEC Filings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch SEC Filings": {
+      "main": [
+        [
+          {
+            "node": "Parse Recent Filings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Recent Filings": {
+      "main": [
+        [
+          {
+            "node": "Has New Filings?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Has New Filings?": {
+      "main": [
+        [
+          {
+            "node": "Format Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Format Alert": {
+      "main": [
+        [
+          {
+            "node": "Send Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "tags": ["investment", "sec", "filings", "alerts"]
+}

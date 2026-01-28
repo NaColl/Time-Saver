@@ -1,0 +1,164 @@
+{
+  "name": "Weekly Financial Report Generator",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "weeksInterval": 1,
+              "triggerAtDay": [5]
+            }
+          ]
+        }
+      },
+      "id": "weekly-trigger",
+      "name": "Every Friday",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Portfolio configuration\nconst portfolio = [\n  { symbol: 'AAPL', shares: 50, costBasis: 150 },\n  { symbol: 'MSFT', shares: 30, costBasis: 280 },\n  { symbol: 'GOOGL', shares: 20, costBasis: 120 },\n  { symbol: 'NVDA', shares: 25, costBasis: 450 },\n  { symbol: 'AMZN', shares: 15, costBasis: 140 }\n];\n\nreturn portfolio.map(p => ({ json: p }));"
+      },
+      "id": "get-portfolio",
+      "name": "Get Portfolio",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "notes": "Configure your portfolio positions"
+    },
+    {
+      "parameters": {
+        "url": "=https://finnhub.io/api/v1/quote?symbol={{ $json.symbol }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth"
+      },
+      "id": "fetch-prices",
+      "name": "Fetch Current Prices",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const position = $('Get Portfolio').first().json;\nconst quote = $input.first().json;\n\nconst currentPrice = quote.c;\nconst marketValue = currentPrice * position.shares;\nconst costValue = position.costBasis * position.shares;\nconst gainLoss = marketValue - costValue;\nconst gainLossPercent = ((marketValue - costValue) / costValue * 100).toFixed(2);\nconst weeklyChange = ((currentPrice - quote.pc) / quote.pc * 100).toFixed(2);\n\nreturn [{\n  json: {\n    symbol: position.symbol,\n    shares: position.shares,\n    costBasis: position.costBasis,\n    currentPrice: currentPrice.toFixed(2),\n    marketValue: marketValue.toFixed(2),\n    gainLoss: gainLoss.toFixed(2),\n    gainLossPercent,\n    weeklyChange,\n    isProfit: gainLoss > 0\n  }\n}];"
+      },
+      "id": "calculate-pl",
+      "name": "Calculate P&L",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "aggregate",
+      "name": "Aggregate All",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "const positions = $input.first().json.data;\n\nlet totalValue = 0;\nlet totalCost = 0;\nlet totalGainLoss = 0;\n\nlet report = `📊 *Weekly Portfolio Report*\\n`;\nreport += `📅 ${new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}\\n\\n`;\nreport += `*Holdings:*\\n\\n`;\n\npositions.forEach(p => {\n  totalValue += parseFloat(p.marketValue);\n  totalCost += p.costBasis * p.shares;\n  totalGainLoss += parseFloat(p.gainLoss);\n  \n  const emoji = p.isProfit ? '🟢' : '🔴';\n  const weekEmoji = parseFloat(p.weeklyChange) > 0 ? '↑' : '↓';\n  \n  report += `${emoji} *${p.symbol}*\\n`;\n  report += `   ${p.shares} shares @ $${p.currentPrice}\\n`;\n  report += `   Value: $${parseFloat(p.marketValue).toLocaleString()}\\n`;\n  report += `   P&L: $${parseFloat(p.gainLoss).toLocaleString()} (${p.gainLossPercent}%)\\n`;\n  report += `   Week: ${weekEmoji} ${p.weeklyChange}%\\n\\n`;\n});\n\nconst totalGainLossPercent = ((totalValue - totalCost) / totalCost * 100).toFixed(2);\nconst profitEmoji = totalGainLoss > 0 ? '📈' : '📉';\n\nreport += `\\n*Portfolio Summary:*\\n`;\nreport += `💰 Total Value: $${totalValue.toLocaleString()}\\n`;\nreport += `${profitEmoji} Total P&L: $${totalGainLoss.toLocaleString()} (${totalGainLossPercent}%)\\n`;\n\nreturn [{ json: { report, totalValue, totalGainLoss, totalGainLossPercent } }];"
+      },
+      "id": "generate-report",
+      "name": "Generate Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.report }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-report",
+      "name": "Send Report",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1560, 300]
+    }
+  ],
+  "connections": {
+    "Every Friday": {
+      "main": [
+        [
+          {
+            "node": "Get Portfolio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Portfolio": {
+      "main": [
+        [
+          {
+            "node": "Fetch Current Prices",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Current Prices": {
+      "main": [
+        [
+          {
+            "node": "Calculate P&L",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate P&L": {
+      "main": [
+        [
+          {
+            "node": "Aggregate All",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate All": {
+      "main": [
+        [
+          {
+            "node": "Generate Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Report": {
+      "main": [
+        [
+          {
+            "node": "Send Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "tags": ["investment", "portfolio", "reports"]
+}

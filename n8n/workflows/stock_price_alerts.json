@@ -1,0 +1,151 @@
+{
+  "name": "Stock Price Alert System",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      },
+      "id": "price-check",
+      "name": "Check Every 15 Min",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300],
+      "notes": "Runs during market hours - add time filtering if needed"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Configure your price alerts\n// Types: 'above', 'below', 'percent_change'\nconst alerts = [\n  { symbol: 'AAPL', type: 'above', value: 200, message: 'Apple above $200' },\n  { symbol: 'AAPL', type: 'below', value: 170, message: 'Apple below $170 - potential buy zone' },\n  { symbol: 'NVDA', type: 'percent_change', value: 5, message: 'NVIDIA moved 5%+' },\n  { symbol: 'SPY', type: 'percent_change', value: 2, message: 'S&P 500 moved 2%+' },\n  { symbol: 'VIX', type: 'above', value: 25, message: 'VIX spike - fear in market' },\n];\n\nreturn alerts.map(a => ({ json: a }));"
+      },
+      "id": "get-alerts",
+      "name": "Get Alert Config",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300],
+      "notes": "Configure your price alerts here"
+    },
+    {
+      "parameters": {
+        "url": "=https://finnhub.io/api/v1/quote?symbol={{ $json.symbol }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpQueryAuth"
+      },
+      "id": "fetch-price",
+      "name": "Fetch Current Price",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [680, 300],
+      "notes": "Uses Finnhub API"
+    },
+    {
+      "parameters": {
+        "jsCode": "const alert = $('Get Alert Config').first().json;\nconst quote = $input.first().json;\n\nconst currentPrice = quote.c;\nconst previousClose = quote.pc;\nconst percentChange = ((currentPrice - previousClose) / previousClose * 100).toFixed(2);\n\nlet triggered = false;\nlet alertMessage = '';\n\nswitch (alert.type) {\n  case 'above':\n    triggered = currentPrice > alert.value;\n    alertMessage = `📈 *${alert.symbol}* is now $${currentPrice} (above $${alert.value})`;\n    break;\n  case 'below':\n    triggered = currentPrice < alert.value;\n    alertMessage = `📉 *${alert.symbol}* is now $${currentPrice} (below $${alert.value})`;\n    break;\n  case 'percent_change':\n    triggered = Math.abs(percentChange) > alert.value;\n    const direction = percentChange > 0 ? '🟢' : '🔴';\n    alertMessage = `${direction} *${alert.symbol}* moved ${percentChange}% (threshold: ${alert.value}%)`;\n    break;\n}\n\nif (triggered) {\n  return [{\n    json: {\n      symbol: alert.symbol,\n      currentPrice,\n      percentChange,\n      message: alertMessage,\n      customMessage: alert.message,\n      triggered: true\n    }\n  }];\n}\n\nreturn [];"
+      },
+      "id": "check-alert",
+      "name": "Check Alert Condition",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.triggered }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-triggered",
+      "name": "If Triggered",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "chatId": "YOUR_TELEGRAM_CHAT_ID",
+        "text": "={{ $json.message }}\\n\\n💡 {{ $json.customMessage }}",
+        "additionalFields": {
+          "parse_mode": "Markdown"
+        }
+      },
+      "id": "send-alert",
+      "name": "Send Price Alert",
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.1,
+      "position": [1340, 200]
+    }
+  ],
+  "connections": {
+    "Check Every 15 Min": {
+      "main": [
+        [
+          {
+            "node": "Get Alert Config",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Alert Config": {
+      "main": [
+        [
+          {
+            "node": "Fetch Current Price",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Current Price": {
+      "main": [
+        [
+          {
+            "node": "Check Alert Condition",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Alert Condition": {
+      "main": [
+        [
+          {
+            "node": "If Triggered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Triggered": {
+      "main": [
+        [
+          {
+            "node": "Send Price Alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    }
+  },
+  "settings": {
+    "saveExecutionProgress": true,
+    "saveManualExecutions": true
+  },
+  "tags": ["investment", "stocks", "price-alerts"]
+}
