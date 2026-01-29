@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-import anthropic
+import httpx
 
 from ..config import Settings
 from ..models.article import Article, ArticleAnalysis
@@ -23,12 +23,27 @@ from ..prompts.notes_prompts import NOTES_PROMPTS
 
 
 class ContentGenerator:
-    """Generates social media content from articles using Claude."""
+    """Generates social media content from articles using Gemini or Claude."""
 
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         self.tz = ZoneInfo(settings.timezone)
+        self.api_provider = settings.api_provider
+
+        # Gemini REST API endpoint
+        self.gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent"
+        self.gemini_api_key = settings.gemini_api_key
+
+        # Anthropic client (lazy loaded)
+        self._anthropic_client = None
+
+    @property
+    def anthropic_client(self):
+        """Lazy load Anthropic client."""
+        if self._anthropic_client is None:
+            import anthropic
+            self._anthropic_client = anthropic.Anthropic(api_key=self.settings.anthropic_api_key)
+        return self._anthropic_client
 
     def generate_week(self, article: Article) -> ContentWeek:
         """Generate a full week of content for all platforms."""
@@ -58,14 +73,7 @@ class ContentGenerator:
             content=article.content[:15000],  # Limit content length
         )
 
-        response = self.client.messages.create(
-            model=self.settings.claude_model,
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        # Parse JSON response
-        response_text = response.content[0].text
+        response_text = self._call_api(prompt)
 
         # Extract JSON from response (handle potential markdown wrapping)
         json_match = re.search(r'\{[\s\S]*\}', response_text)
@@ -213,16 +221,52 @@ class ContentGenerator:
 
         return posts
 
-    def _generate_content(self, prompt: str) -> str:
-        """Generate content using Claude."""
-        response = self.client.messages.create(
+    def _call_gemini_rest(self, prompt: str) -> str:
+        """Call Gemini API using REST endpoint."""
+        url = f"{self.gemini_url}?key={self.gemini_api_key}"
+
+        payload = {
+            "contents": [{
+                "parts": [{
+                    "text": f"{SYSTEM_PROMPT}\n\n{prompt}"
+                }]
+            }],
+            "generationConfig": {
+                "temperature": 0.7,
+                "maxOutputTokens": 2000,
+            }
+        }
+
+        with httpx.Client(timeout=60.0) as client:
+            response = client.post(url, json=payload)
+            response.raise_for_status()
+            data = response.json()
+
+            # Extract text from response
+            if "candidates" in data and data["candidates"]:
+                return data["candidates"][0]["content"]["parts"][0]["text"]
+            return ""
+
+    def _call_anthropic(self, prompt: str) -> str:
+        """Call Anthropic/Claude API."""
+        response = self.anthropic_client.messages.create(
             model=self.settings.claude_model,
-            max_tokens=1500,
+            max_tokens=2000,
             system=SYSTEM_PROMPT,
             messages=[{"role": "user", "content": prompt}],
         )
+        return response.content[0].text
 
-        content = response.content[0].text
+    def _call_api(self, prompt: str) -> str:
+        """Call the appropriate API (Gemini or Anthropic)."""
+        if self.api_provider == "gemini" and self.gemini_api_key:
+            return self._call_gemini_rest(prompt)
+        else:
+            return self._call_anthropic(prompt)
+
+    def _generate_content(self, prompt: str) -> str:
+        """Generate content using the configured API."""
+        content = self._call_api(prompt)
 
         # Extract content between --- markers if present
         match = re.search(r'---\n([\s\S]*?)\n---', content)

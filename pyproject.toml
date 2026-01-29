@@ -5,8 +5,8 @@ description = "Personal assistant agent that transforms Substack posts into plat
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "google-generativeai>=0.8.0",
     "anthropic>=0.40.0",
-    "feedparser>=6.0.10",
     "httpx>=0.27.0",
     "beautifulsoup4>=4.12.0",
     "pydantic>=2.5.0",

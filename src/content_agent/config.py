@@ -33,12 +33,22 @@ DEFAULT_SUBSTACKS = [
 class Settings(BaseSettings):
     """Application settings loaded from environment variables."""
 
-    # API Configuration
-    anthropic_api_key: str = Field(..., validation_alias="ANTHROPIC_API_KEY")
+    # API Configuration - Support both Gemini and Anthropic
+    gemini_api_key: str = Field(default="", validation_alias="GEMINI_API_KEY")
+    anthropic_api_key: str = Field(default="", validation_alias="ANTHROPIC_API_KEY")
+
+    # Model configuration
+    gemini_model: str = Field(
+        default="gemini-2.0-flash",
+        validation_alias="GEMINI_MODEL"
+    )
     claude_model: str = Field(
         default="claude-sonnet-4-20250514",
         validation_alias="CLAUDE_MODEL"
     )
+
+    # Which API to use: "gemini" or "anthropic"
+    api_provider: str = Field(default="gemini", validation_alias="API_PROVIDER")
 
     # Scheduling
     timezone: str = Field(default="Europe/Helsinki", validation_alias="TIMEZONE")
